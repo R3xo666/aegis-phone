@@ -46,7 +46,8 @@ So, I built **Aegis-Phone**: a battle-hardened, zero-hardcode CLI & GUI suite th
 - 📩 **Live Notification & OTP Extractor (`notifs`):** Pulls active notifications directly from Android's notification manager and highlights incoming 2FA / OTP codes (`[🔑 OTP: 839102]`).
 - 📞 **Terminal Call Center (`calls`, `dial`, `answer`, `hangup`):** Check call logs, answer incoming phone calls, or dial phone numbers directly via your Linux keyboard.
 - 🛡️ **Zero-Injection Hardened:** Audited with `/sentinel-security` rules. Features Base64 binary clipboard piping, preventing shell metacharacter command injection (`CWE-78`).
-- 🌐 **Dynamic Wi-Fi IP Discovery:** No hardcoded IPs. Resolves real-time interface IP (`wlan0`) and configures ADB over TCP/IP 5555 automatically.
+- 🌐 **Dynamic Wi-Fi IP Discovery & Disconnect (`--wifi`, `disconnect`):** Resolves real-time interface IP (`wlan0`) and connects wirelessly. Cleanly disconnect with `phone disconnect`.
+- 🔀 **Smart Multi-Device Auto-Routing:** Never crashes with `Multiple (2) ADB devices` error when both USB and Wi-Fi are connected simultaneously; automatically detects and prioritizes ultra-fast physical USB.
 
 ---
 
@@ -84,14 +85,21 @@ phone -b
 # 4. Wireless Mirror over Wi-Fi (Auto-detects IP on wlan0)
 phone --wifi
 
-# 5. Eco / Low-Battery Recovery Mode (720p @ 4Mbps, 30 FPS cap)
+# 5. Disconnect Wireless Wi-Fi Sessions (Revert cleanly to physical USB)
+phone disconnect
+
+# 6. Eco / Low-Battery Recovery Mode (720p @ 4Mbps, 30 FPS cap)
 phone --eco
 
-# 6. Hardware OTG Simulation (Direct mouse & keyboard pass-through, no video stream)
+# 7. Hardware OTG Simulation (Direct mouse & keyboard pass-through, no video stream)
 phone --otg
 
-# 7. Audio Forwarding Only (Listen to calls/media without opening video window)
+# 8. Audio Forwarding Only (Listen to calls/media without opening video window)
 phone --audio
+
+# 9. Explicit Interface Routing (When USB and Wi-Fi are active simultaneously)
+phone -d --hq    # Force physical USB connection
+phone -e --hq    # Force wireless TCP/IP Wi-Fi connection
 ```
 
 ---
