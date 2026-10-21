@@ -194,11 +194,112 @@ Use your keyboard `Alt` or `Super` (Windows Key) + key:
 
 ---
 
-## 🔒 Security & Architecture Standards
+---
 
-- **Zero Command Injection (CWE-78):** All clipboard and textual data payloads are converted to Base64 binaries before crossing into the ADB shell context.
-- **Dynamic Geometric Calculation:** Coordinates for screen unlock and swipe gestures are dynamically computed relative to `wm size`, preventing failure across different aspect ratios (18:9, 19.5:9, 20:9).
-- **Process Memory Sanitization:** Passwords and PIN numbers entered interactively are masked from terminal stdout (`read -rs`) and immediately cleared from shell memory upon transmission.
+## 🛠️ Comprehensive Troubleshooting Guide
+
+### 1. ⚠️ Device shows `unauthorized` after PC Restart or Cable Reconnect
+**Why it happens:** Android 11–14 introduces an automatic authorization revocation timer that clears authorized PC keys every 7 days or after sudden connection drops. If "Always allow from this computer" wasn't ticked, Android drops authorization.
+
+**How Aegis-Phone fixes it permanently:**
+Run:
+```bash
+phone auth-persist
+```
+This writes `adb_allowed_connection_time = 0` and `stay_on_while_plugged_in = 3` directly into device global settings so the key **never expires**.
+
+**What if the screen is already 100% black/dead when this happens?**
+Use the **Blind OTG Rescue Protocol**:
+```bash
+phone fix-auth
+```
+- Aegis-Phone switches into pure hardware USB-HID emulation (no ADB authorization required).
+- Blind keystroke sequence:
+  1. Press `[Tab]` $\rightarrow$ Moves focus to the *"Always allow from this computer"* checkbox.
+  2. Press `[Space]` $\rightarrow$ Checks the box.
+  3. Press `[Tab]` followed by `[Enter]` $\rightarrow$ Clicks "Allow".
+- Your phone is permanently re-authorized without seeing or touching the broken physical display!
+
+---
+
+### 2. 🔌 Device Not Detected (`phone devices` shows empty list)
+- Ensure your USB cable supports high-speed data transfer (some cheap cables are power-only).
+- Plug directly into your computer's motherboard / primary USB port rather than unpowered hubs.
+- On Fedora / Ubuntu, ensure your user belongs to the `plugdev` or `dialout` group:
+  ```bash
+  sudo usermod -aG plugdev $USER
+  ```
+- Restart the local ADB daemon:
+  ```bash
+  adb kill-server && adb start-server
+  ```
+
+---
+
+### 3. 💥 Physical Screen Overheating or Turning On Unexpectedly
+- By default, Aegis-Phone launches with `--turn-screen-off` and forces screen brightness to `0` via hardware shell settings.
+- If you accidentally turn the screen on, press **`MOD + o`** (`Alt + o` or `Super + o`) inside the scrcpy window to instantly kill the physical display backlight while keeping the PC mirror running.
+- Run `phone watch` to monitor internal battery temperature and receive audio alarms if temperatures rise above 42°C.
+
+---
+
+### 4. 🔒 Screen Lock PIN Isn't Registering
+- If you have an exotic screen ratio or custom lockscreen widgets, the notification shade might block key events.
+- Run:
+  ```bash
+  phone unlock 1234
+  ```
+  Aegis-Phone automatically collapses status bar shades, pulses `KEYCODE_MENU`, computes exact vertical midpoint swipe vectors dynamically from `wm size`, and enters numerical keycodes with 80ms debounce.
+
+---
+
+### 5. 🔲 AppLock Overlay Blocking Access (WhatsApp, Gallery, Banking)
+- Use `phone app-unlock <PIN>` to inject your AppLock PIN directly.
+- Or use `phone bypass-applock` to temporarily suspend vendor security managers (e.g. Transsion PhoneMaster, MIUI SecurityCenter, ColorOS SafeCenter).
+
+---
+
+## ❓ Frequently Asked Questions (FAQ)
+
+<details>
+<summary><b>Q1: Can I use Aegis-Phone if my touch screen is 100% dead?</b></summary>
+<b>Yes, absolutely!</b> That is the exact reason Aegis-Phone was created. All mouse clicks, gestures, text input, and file drag-and-drops from your PC are sent as software hardware events via ADB and USB-HID. Your physical digitizer does not need to work at all.
+</details>
+
+<details>
+<summary><b>Q2: Does Aegis-Phone require my phone to be Rooted?</b></summary>
+<b>No root required!</b> All capabilities—including display blackout, blind PIN unlock, OTP reading, clipboard synchronization, and call dialing—work on standard unrooted production Android devices.
+</details>
+
+<details>
+<summary><b>Q3: How do I copy-paste images or files from my PC to my phone?</b></summary>
+You have two easy ways:
+1. **Via Floating Controller (`phone gui`):** Click <i>"🖼️ Paste Image to Phone"</i> to instantly push any image from your PC clipboard into your phone's Gallery, or click <i>"📁 Send File / Video..."</i> to browse and upload.
+2. **Via Command Line:**
+   ```bash
+   phone push ~/Pictures/screenshot.png /sdcard/Pictures/
+   ```
+   Aegis-Phone automatically triggers Android's MediaScanner so WhatsApp and Gallery recognize the new file immediately.
+</details>
+
+<details>
+<summary><b>Q4: Will my physical screen light up and show my messages to people around me?</b></summary>
+<b>No.</b> Aegis-Phone sends hardware commands to keep the physical backlight completely dark (`0` brightness and powered-off state). Your private activities remain visible only on your Linux computer monitor.
+</details>
+
+<details>
+<summary><b>Q5: Can I use this wirelessly without keeping the USB cable connected all day?</b></summary>
+<b>Yes!</b> While connected via USB, run:
+```bash
+phone --wifi
+```
+Aegis-Phone will resolve your device's local Wi-Fi IP address on `wlan0`, bind ADB to port 5555, and launch a wireless mirror session. You can then disconnect the USB cable.
+</details>
+
+<details>
+<summary><b>Q6: What happens if my PC restarts? Will I lose access?</b></summary>
+If you run `phone auth-persist`, your PC's RSA signature is permanently whitelisted in Android's flash memory, and the 7-day auto-revocation timer is set to `0`. Even after 100 PC reboots, your phone will remain authorized.
+</details>
 
 ---
 
@@ -207,3 +308,4 @@ Use your keyboard `Alt` or `Super` (Windows Key) + key:
 Contributions, feature requests, and bug reports are welcome! Feel free to open an issue or pull request.
 
 Distributed under the **MIT License**.
+

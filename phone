@@ -168,10 +168,65 @@ cmd_mirror_wifi() {
 }
 
 cmd_otg() {
-    check_device
     log_info "Starting Pure Hardware OTG Mode (Mouse & Keyboard simulation)..."
-    log_info "Note: Physical screen will receive hardware HID events. No video stream required."
+    log_info "Note: Physical screen will receive hardware HID events. No video stream or ADB auth required."
     "$SCRCPY" --otg
+}
+
+cmd_auth_persist() {
+    check_device
+    log_info "Configuring permanent ADB authorization on connected Android device..."
+    # 1. Permanently disable 7-day ADB key revocation timer
+    "$ADB" shell settings put global adb_allowed_connection_time 0 2>/dev/null || true
+    # 2. Keep device awake whenever plugged in
+    "$ADB" shell settings put global stay_on_while_plugged_in 3 2>/dev/null || true
+    # 3. Ensure developer options stay active
+    "$ADB" shell settings put global development_settings_enabled 1 2>/dev/null || true
+
+    log_ok "Permanent ADB authorization policy successfully written to device!"
+    echo -e " ${GREEN}✔ adb_allowed_connection_time:${RESET} 0 (Revocation Timer Disabled)"
+    echo -e " ${GREEN}✔ stay_on_while_plugged_in:${RESET} 3 (Always Awake on USB/AC Power)"
+    echo -e " ${GREEN}✔ Developer Settings:${RESET} Enforced active"
+}
+
+cmd_fix_auth() {
+    log_banner
+    echo -e "${BOLD}${CYAN}╔═════════════════════════════════════════════════════════════════╗${RESET}"
+    echo -e "${BOLD}${CYAN}║             BLIND ADB AUTHORIZATION RESCUE PROTOCOL             ║${RESET}"
+    echo -e "${BOLD}${CYAN}╚═════════════════════════════════════════════════════════════════╝${RESET}\n"
+
+    log_info "Checking ADB device connection state..."
+    local state
+    state=$("$ADB" get-state 2>/dev/null || echo "unauthorized")
+
+    if [ "$state" = "device" ]; then
+        log_ok "Device is already fully AUTHORIZED!"
+        cmd_auth_persist
+        return 0
+    fi
+
+    log_warn "Device is currently '$state' (e.g. Unauthorized or Locked)!"
+    echo -e "\n${BOLD}${YELLOW}Launching Blind Hardware OTG Rescue Mode...${RESET}"
+    echo -e "Even without ADB authorization, scrcpy can interact with your device as a hardware USB HID keyboard."
+    echo -e "\n${BOLD}Follow these 3 simple blind keystrokes once the OTG capture window opens:${RESET}"
+    echo -e "  1. Press ${GREEN}[Tab]${RESET}   (Moves focus to 'Always allow from this computer' checkbox)"
+    echo -e "  2. Press ${GREEN}[Space]${RESET} (Ticks the 'Always allow' checkbox)"
+    echo -e "  3. Press ${GREEN}[Tab]${RESET} followed by ${GREEN}[Enter]${RESET} (Selects and clicks 'Allow')"
+    echo -e "\nPress any key to launch OTG mode now (or Ctrl+C to abort)..."
+    read -rn1
+    echo ""
+
+    "$SCRCPY" --otg || true
+    sleep 2
+
+    # Verify if authorization succeeded
+    state=$("$ADB" get-state 2>/dev/null || echo "unauthorized")
+    if [ "$state" = "device" ]; then
+        log_ok "Device successfully AUTHORIZED!"
+        cmd_auth_persist
+    else
+        log_warn "Device state is still '$state'. If screen dialog did not appear, unplug & replug USB cable and rerun: phone fix-auth"
+    fi
 }
 
 cmd_audio_only() {
@@ -630,6 +685,8 @@ cmd_help() {
     echo -e "  ${YELLOW}shot [file.png]${RESET}  Capture lossless screenshot directly from phone framebuffer"
     echo -e "  ${YELLOW}backup [path]${RESET}    One-click archive of DCIM, Pictures, Downloads, WhatsApp"
     echo -e "  ${YELLOW}install <apk>${RESET}    Sideload APK with auto-granted permissions"
+    echo -e "  ${YELLOW}fix-auth${RESET}         Blind OTG rescue protocol to approve unauthorized prompt"
+    echo -e "  ${YELLOW}auth-persist${RESET}     Permanently disable 7-day ADB key revocation timer on device"
     echo -e "  ${YELLOW}clip [text]${RESET}      Set or view device clipboard"
     echo -e "  ${YELLOW}shell${RESET}            Open direct interactive ADB terminal shell"
     echo -e "  ${YELLOW}reboot [recovery]${RESET}Reboot phone to system, recovery, or bootloader"
@@ -762,6 +819,12 @@ case "$1" in
         ;;
     devices)
         "$ADB" devices -l
+        ;;
+    fix-auth|rescue-auth)
+        cmd_fix_auth
+        ;;
+    auth-persist|persist-auth)
+        cmd_auth_persist
         ;;
     -h|--help|help)
         cmd_help

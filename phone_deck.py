@@ -75,6 +75,9 @@ class PhoneDeck(tk.Tk):
         b_bypass = btn(sec_lock, "⚡ Bypass AppLock", self.bypass_applock, bg="#1e293b", fg="#94a3b8")
         b_bypass.pack(fill="x", padx=6, pady=3)
 
+        b_auth = btn(sec_lock, "🛡️ Rescue Auth (OTG)", self.rescue_auth, bg="#1e293b", fg="#38bdf8")
+        b_auth.pack(fill="x", padx=6, pady=3)
+
         # Section 2: Hardware Navigation
         sec_nav = tk.LabelFrame(self, text=" System Navigation ", font=("Helvetica", 8, "bold"),
                                 fg="#a1a1aa", bg="#121214", bd=1, relief="solid")
@@ -130,6 +133,17 @@ class PhoneDeck(tk.Tk):
     def bypass_applock(self):
         subprocess.run([os.path.join(SCRCPY_DIR, "phone"), "bypass-applock"])
         self.lbl_status.config(text="● AppLock Overlay Dismissed", fg="#eab308")
+
+    def rescue_auth(self):
+        msg = ("Blind Authorization Guide:\n\n"
+               "When the OTG mode starts:\n"
+               "1. Press [Tab] (Focuses 'Always allow' checkbox)\n"
+               "2. Press [Space] (Ticks the checkbox)\n"
+               "3. Press [Tab] then [Enter] (Clicks 'Allow')\n\n"
+               "Launch OTG Rescue now?")
+        if messagebox.askyesno("Rescue ADB Authorization", msg):
+            subprocess.Popen([os.path.join(SCRCPY_DIR, "phone"), "otg"])
+            self.lbl_status.config(text="● OTG Rescue Active", fg="#38bdf8")
 
     def view_notifs(self):
         terminals = [
