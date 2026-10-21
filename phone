@@ -19,20 +19,62 @@ SCRCPY_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
 
 # Resolve binaries: Prioritize local bundle, then fallback to system PATH
 if [ -x "${SCRCPY_DIR}/adb" ]; then
-    ADB="${SCRCPY_DIR}/adb"
+    RAW_ADB="${SCRCPY_DIR}/adb"
 elif command -v adb >/dev/null 2>&1; then
-    ADB="$(command -v adb)"
+    RAW_ADB="$(command -v adb)"
 else
-    ADB="${SCRCPY_DIR}/adb"
+    RAW_ADB="${SCRCPY_DIR}/adb"
 fi
 
 if [ -x "${SCRCPY_DIR}/scrcpy" ]; then
-    SCRCPY="${SCRCPY_DIR}/scrcpy"
+    RAW_SCRCPY="${SCRCPY_DIR}/scrcpy"
 elif command -v scrcpy >/dev/null 2>&1; then
-    SCRCPY="$(command -v scrcpy)"
+    RAW_SCRCPY="$(command -v scrcpy)"
 else
-    SCRCPY="${SCRCPY_DIR}/scrcpy"
+    RAW_SCRCPY="${SCRCPY_DIR}/scrcpy"
 fi
+
+# Detect device topology: If both USB and TCP/IP (Wi-Fi) are attached simultaneously,
+# automatically prioritize the ultra-fast USB interface unless explicitly overridden.
+resolve_target_device() {
+    local usb_dev tcp_dev
+    usb_dev=$("$RAW_ADB" devices -l 2>/dev/null | grep -E "usb:" | awk '{print $1}' | head -n1 || true)
+    tcp_dev=$("$RAW_ADB" devices -l 2>/dev/null | grep -E "^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+" | awk '{print $1}' | head -n1 || true)
+
+    if [ -n "$TARGET_SERIAL" ]; then
+        ACTIVE_SERIAL="$TARGET_SERIAL"
+    elif [ -n "$usb_dev" ]; then
+        ACTIVE_SERIAL="$usb_dev"
+    elif [ -n "$tcp_dev" ]; then
+        ACTIVE_SERIAL="$tcp_dev"
+    else
+        ACTIVE_SERIAL=""
+    fi
+}
+
+resolve_target_device
+
+# Wrappers that inject -s <serial> automatically so "Multiple devices" error NEVER occurs
+run_adb() {
+    resolve_target_device
+    if [ -n "$ACTIVE_SERIAL" ]; then
+        "$RAW_ADB" -s "$ACTIVE_SERIAL" "$@"
+    else
+        "$RAW_ADB" "$@"
+    fi
+}
+
+run_scrcpy() {
+    resolve_target_device
+    if [ -n "$ACTIVE_SERIAL" ]; then
+        "$RAW_SCRCPY" -s "$ACTIVE_SERIAL" "$@"
+    else
+        "$RAW_SCRCPY" "$@"
+    fi
+}
+
+ADB="run_adb"
+SCRCPY="run_scrcpy"
 
 # Formatting / Colors
 BOLD='\033[1m'
@@ -63,8 +105,9 @@ EOF
 }
 
 check_device() {
+    resolve_target_device
     local dev_count
-    dev_count=$("$ADB" devices | grep -E -v "^List" | grep -c "device$" || true)
+    dev_count=$("$RAW_ADB" devices | grep -E -v "^List" | grep -c "device$" || true)
     if [ "$dev_count" -eq 0 ]; then
         log_error "No authorized Android device detected!"
         echo -e "\n${YELLOW}Troubleshooting steps:${RESET}"
@@ -106,6 +149,7 @@ cmd_mirror_default() {
     "$ADB" shell input keyevent KEYCODE_WAKEUP 2>/dev/null || true
     "$ADB" shell cmd statusbar collapse 2>/dev/null || true
     "$SCRCPY" \
+        ${ACTIVE_SERIAL:+-s "$ACTIVE_SERIAL"} \
         --turn-screen-off \
         --stay-awake \
         --video-bit-rate=16M \
@@ -123,6 +167,7 @@ cmd_mirror_hq() {
     "$ADB" shell input keyevent KEYCODE_WAKEUP 2>/dev/null || true
     "$ADB" shell cmd statusbar collapse 2>/dev/null || true
     "$SCRCPY" \
+        ${ACTIVE_SERIAL:+-s "$ACTIVE_SERIAL"} \
         --turn-screen-off \
         --stay-awake \
         --video-bit-rate=30M \
@@ -136,6 +181,7 @@ cmd_mirror_eco() {
     check_device
     log_info "Starting Eco / Low-Battery Recovery Mode (720p @ 4Mbps)..."
     "$SCRCPY" \
+        ${ACTIVE_SERIAL:+-s "$ACTIVE_SERIAL"} \
         --turn-screen-off \
         --max-size=720 \
         --video-bit-rate=4M \
@@ -165,6 +211,12 @@ cmd_mirror_wifi() {
 
     log_ok "Wirelessly connected! Launching wireless mirror with physical display off..."
     "$SCRCPY" --tcpip="$ip:5555" --turn-screen-off --stay-awake --video-bit-rate=16M --max-fps=60 --window-title="Phone (Wireless Mirror)"
+}
+
+cmd_disconnect_wifi() {
+    log_info "Disconnecting all active Wi-Fi / TCP-IP ADB endpoints..."
+    "$RAW_ADB" disconnect 2>/dev/null || true
+    log_ok "Disconnected Wi-Fi endpoints! ADB is now cleanly locked to physical USB."
 }
 
 cmd_otg() {
@@ -693,8 +745,32 @@ cmd_help() {
     echo ""
 }
 
+# Parse global target override flags (-d for USB, -e for TCP/IP, -s for specific serial)
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -d|--select-usb)
+            TARGET_SERIAL=$("$RAW_ADB" devices -l 2>/dev/null | grep -E "usb:" | awk '{print $1}' | head -n1 || true)
+            resolve_target_device
+            shift
+            ;;
+        -e|--select-tcpip)
+            TARGET_SERIAL=$("$RAW_ADB" devices -l 2>/dev/null | grep -E "^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+" | awk '{print $1}' | head -n1 || true)
+            resolve_target_device
+            shift
+            ;;
+        -s|--serial)
+            TARGET_SERIAL="$2"
+            resolve_target_device
+            shift 2
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+
 # Main Execution Switch
-case "$1" in
+case "${1:-}" in
     ""|-s|--screen-off)
         cmd_mirror_default
         ;;
@@ -819,6 +895,9 @@ case "$1" in
         ;;
     devices)
         "$ADB" devices -l
+        ;;
+    disconnect|disconnect-wifi|unwifi)
+        cmd_disconnect_wifi
         ;;
     fix-auth|rescue-auth)
         cmd_fix_auth
