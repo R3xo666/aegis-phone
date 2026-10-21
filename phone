@@ -1,0 +1,774 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# AEGIS-PHONE v5.2: Enterprise Dead-Screen Android Recovery & Control Suite
+# Engineered for scrcpy 5.0.1 + ADB on Linux
+# Features: Dynamic Resolution, Zero-Injection Clipboard, OTP & Notification Reader,
+# Call Log Inspector, Direct Dialer, App Launcher, Battery Watchdog
+# ==============================================================================
+
+set -eo pipefail
+
+# Resolve physical directory even when invoked through symlinks
+SOURCE="${BASH_SOURCE[0]}"
+while [ -h "$SOURCE" ]; do
+    DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+    SOURCE="$(readlink "$SOURCE")"
+    [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+SCRCPY_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+
+# Resolve binaries: Prioritize local bundle, then fallback to system PATH
+if [ -x "${SCRCPY_DIR}/adb" ]; then
+    ADB="${SCRCPY_DIR}/adb"
+elif command -v adb >/dev/null 2>&1; then
+    ADB="$(command -v adb)"
+else
+    ADB="${SCRCPY_DIR}/adb"
+fi
+
+if [ -x "${SCRCPY_DIR}/scrcpy" ]; then
+    SCRCPY="${SCRCPY_DIR}/scrcpy"
+elif command -v scrcpy >/dev/null 2>&1; then
+    SCRCPY="$(command -v scrcpy)"
+else
+    SCRCPY="${SCRCPY_DIR}/scrcpy"
+fi
+
+# Formatting / Colors
+BOLD='\033[1m'
+DIM='\033[2m'
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+MAGENTA='\033[0;35m'
+RESET='\033[0m'
+
+# Helpers
+log_info()    { echo -e "${CYAN}ℹ [INFO]${RESET} $*"; }
+log_ok()      { echo -e "${GREEN}✔ [SUCCESS]${RESET} $*"; }
+log_warn()    { echo -e "${YELLOW}⚠ [WARN]${RESET} $*"; }
+log_error()   { echo -e "${RED}✖ [ERROR]${RESET} $*" >&2; }
+log_banner()  {
+    echo -e "${MAGENTA}${BOLD}"
+    cat << "EOF"
+    ___    ______ _____ _____ _____       ____  __  ______  _   ________
+   /   |  / ____// ___// ___// ___/      / __ \/ / / / __ \/ | / / ____/
+  / /| | / __/  / / _  \__ \ \__ \ _____/ /_/ / /_/ / / / /  |/ / __/   
+ / ___ |/ /___ / /_/ /___/ /___/ /_____/ ____/ __  / /_/ / /|  / /___   
+/_/  |_/_____/ \____//____//____/     /_/   /_/ /_/\____/_/ |_/_____/   
+EOF
+    echo -e "${RESET}${DIM} Enterprise Android Dead-Screen Rescue & Control Suite v5.2${RESET}\n"
+}
+
+check_device() {
+    local dev_count
+    dev_count=$("$ADB" devices | grep -E -v "^List" | grep -c "device$" || true)
+    if [ "$dev_count" -eq 0 ]; then
+        log_error "No authorized Android device detected!"
+        echo -e "\n${YELLOW}Troubleshooting steps:${RESET}"
+        echo -e " 1. Ensure USB cable is firmly connected."
+        echo -e " 2. Check if device is in charging-only or unauthorized state."
+        echo -e " 3. Run: ${BOLD}phone devices${RESET} to inspect connection.\n"
+        exit 1
+    fi
+}
+
+get_screen_dimensions() {
+    local dims
+    dims=$("$ADB" shell wm size 2>/dev/null | awk -F': ' '/Physical size/ {print $2}' | tr -d '\r\n')
+    if [ -z "$dims" ]; then
+        dims="1080x2400"
+    fi
+    echo "$dims"
+}
+
+get_phone_ip() {
+    local ip
+    ip=$("$ADB" shell ip -4 addr show wlan0 2>/dev/null | awk '/inet / {print $2}' | cut -d/ -f1 | head -n1 || true)
+    if [ -z "$ip" ]; then
+        ip=$("$ADB" shell ip route 2>/dev/null | awk '{print $9}' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | head -n1 || true)
+    fi
+    if [ -z "$ip" ]; then
+        ip=$("$ADB" shell getprop dhcp.wlan0.ipaddress 2>/dev/null | tr -d '\r\n' || true)
+    fi
+    echo "$ip"
+}
+
+# Subcommands: Mirroring
+cmd_mirror_default() {
+    check_device
+    log_info "Initiating High-Definition Dead-Screen Mirror (Native 1080p @ 16Mbps)..."
+    log_info "Blacking out physical screen brightness & enforcing display off..."
+    # 1. Zero out brightness immediately to kill backlight & ghost touch triggers
+    "$ADB" shell settings put system screen_brightness 0 2>/dev/null || true
+    "$ADB" shell input keyevent KEYCODE_WAKEUP 2>/dev/null || true
+    "$ADB" shell cmd statusbar collapse 2>/dev/null || true
+    "$SCRCPY" \
+        --turn-screen-off \
+        --stay-awake \
+        --video-bit-rate=16M \
+        --max-fps=60 \
+        --power-off-on-close \
+        --audio-codec=opus \
+        --window-title="Phone (High-Definition Dead Screen Mode)"
+}
+
+cmd_mirror_hq() {
+    check_device
+    log_info "Starting Ultra-Crisp Uncompressed Mode (Original Native Resolution @ 30Mbps)..."
+    log_info "Blacking out physical screen brightness & enforcing display off..."
+    "$ADB" shell settings put system screen_brightness 0 2>/dev/null || true
+    "$ADB" shell input keyevent KEYCODE_WAKEUP 2>/dev/null || true
+    "$ADB" shell cmd statusbar collapse 2>/dev/null || true
+    "$SCRCPY" \
+        --turn-screen-off \
+        --stay-awake \
+        --video-bit-rate=30M \
+        --max-fps=60 \
+        --power-off-on-close \
+        --audio-codec=opus \
+        --window-title="Phone (Ultra-Crisp 30Mbps Studio Mode)"
+}
+
+cmd_mirror_eco() {
+    check_device
+    log_info "Starting Eco / Low-Battery Recovery Mode (720p @ 4Mbps)..."
+    "$SCRCPY" \
+        --turn-screen-off \
+        --max-size=720 \
+        --video-bit-rate=4M \
+        --max-fps=30 \
+        --stay-awake \
+        --window-title="Phone (Eco Recovery Mode)"
+}
+
+cmd_mirror_wifi() {
+    log_info "Probing wireless network configuration on device..."
+    local ip
+    ip=$(get_phone_ip)
+    
+    if [ -z "$ip" ]; then
+        log_error "Could not automatically resolve device Wi-Fi IP. Ensure phone is connected to Wi-Fi."
+        echo -n "Enter phone IP manually (e.g. 192.168.1.100): "
+        read -r ip
+    fi
+
+    log_info "Device Wi-Fi IP detected: ${BOLD}$ip${RESET}"
+    log_info "Enabling TCP/IP service on port 5555..."
+    "$ADB" tcpip 5555
+    sleep 1
+
+    log_info "Connecting to $ip:5555..."
+    "$ADB" connect "$ip:5555"
+
+    log_ok "Wirelessly connected! Launching wireless mirror with physical display off..."
+    "$SCRCPY" --tcpip="$ip:5555" --turn-screen-off --stay-awake --video-bit-rate=16M --max-fps=60 --window-title="Phone (Wireless Mirror)"
+}
+
+cmd_otg() {
+    check_device
+    log_info "Starting Pure Hardware OTG Mode (Mouse & Keyboard simulation)..."
+    log_info "Note: Physical screen will receive hardware HID events. No video stream required."
+    "$SCRCPY" --otg
+}
+
+cmd_audio_only() {
+    check_device
+    log_info "Forwarding device audio only (No video window)..."
+    "$SCRCPY" --no-video --audio-codec=opus
+}
+
+# Subcommands: Unlock & Keycodes
+cmd_unlock() {
+    check_device
+    local pin="$1"
+    if [ -z "$pin" ]; then
+        echo -n "Enter Device Lock PIN (masked): "
+        read -rs pin
+        echo ""
+    fi
+
+    log_info "Forcing device wakeup..."
+    "$ADB" shell input keyevent KEYCODE_WAKEUP
+    "$ADB" shell input keyevent 224 # KEYCODE_WAKEUP
+    sleep 0.3
+
+    log_info "Collapsing notification shade & opening keypad..."
+    "$ADB" shell cmd statusbar collapse 2>/dev/null || true
+    "$ADB" shell input keyevent KEYCODE_MENU 2>/dev/null || true
+    
+    # Dynamic coordinate computation based on current wm size
+    local dims width height x_mid y_start y_end
+    dims=$(get_screen_dimensions)
+    width=$(echo "$dims" | cut -dx -f1)
+    height=$(echo "$dims" | cut -dx -f2)
+    x_mid=$((width / 2))
+    y_start=$((height * 85 / 100))
+    y_end=$((height * 25 / 100))
+
+    "$ADB" shell input swipe "$x_mid" "$y_start" "$x_mid" "$y_end" 150
+    sleep 0.5
+
+    log_info "Transmitting PIN keycodes..."
+    for (( i=0; i<${#pin}; i++ )); do
+        digit="${pin:$i:1}"
+        case "$digit" in
+            0) key=7 ;;
+            1) key=8 ;;
+            2) key=9 ;;
+            3) key=10 ;;
+            4) key=11 ;;
+            5) key=12 ;;
+            6) key=13 ;;
+            7) key=14 ;;
+            8) key=15 ;;
+            9) key=16 ;;
+            *) key="" ;;
+        esac
+        if [ -n "$key" ]; then
+            "$ADB" shell input keyevent "$key"
+            sleep 0.08
+        fi
+    done
+    
+    # Enter / Confirm
+    "$ADB" shell input keyevent 66
+    pin="" # Wipe from memory
+    log_ok "Unlock sequence completed!"
+}
+
+cmd_app_unlock() {
+    check_device
+    local pin="$1"
+    if [ -z "$pin" ]; then
+        echo -n "Enter AppLock PIN (masked): "
+        read -rs pin
+        echo ""
+    fi
+
+    log_info "Transmitting AppLock PIN keycodes..."
+    for (( i=0; i<${#pin}; i++ )); do
+        digit="${pin:$i:1}"
+        case "$digit" in
+            0) key=7 ;;
+            1) key=8 ;;
+            2) key=9 ;;
+            3) key=10 ;;
+            4) key=11 ;;
+            5) key=12 ;;
+            6) key=13 ;;
+            7) key=14 ;;
+            8) key=15 ;;
+            9) key=16 ;;
+            *) key="" ;;
+        esac
+        if [ -n "$key" ]; then
+            "$ADB" shell input keyevent "$key"
+            sleep 0.08
+        fi
+    done
+    "$ADB" shell input keyevent 66 2>/dev/null || true
+    pin=""
+    log_ok "AppLock keycode sequence injected!"
+}
+
+cmd_bypass_applock() {
+    check_device
+    log_info "Detecting and suspending active AppLock overlays across known OEM packages..."
+    # Universal AppLock packages (Transsion, Xiaomi, Realme/Oppo, Vivo, Samsung, DoMobile)
+    local applock_pkgs=(
+        "com.transsion.phonemaster"
+        "com.miui.securitycenter"
+        "com.coloros.safecenter"
+        "com.iqoo.secure"
+        "com.samsung.android.app.lock"
+        "com.domobile.applockwatcher"
+        "com.sp.protector.free"
+    )
+    for pkg in "${applock_pkgs[@]}"; do
+        if "$ADB" shell "pm path $pkg" >/dev/null 2>&1; then
+            "$ADB" shell am force-stop "$pkg" 2>/dev/null || true
+        fi
+    done
+    log_ok "AppLock overlay processes suspended. Target app should now be directly accessible!"
+}
+
+cmd_gui() {
+    check_device
+    log_info "Launching Aegis Floating Controller Deck..."
+    python3 "${SCRCPY_DIR}/phone_deck.py" &
+    log_ok "Controller deck started in floating window!"
+}
+
+cmd_unlock_and_mirror() {
+    local pin="$1"
+    cmd_unlock "$pin"
+    sleep 0.5
+    cmd_mirror_default
+}
+
+# Subcommands: Communications & Diagnostics
+cmd_notifs() {
+    check_device
+    echo -e "\n${BOLD}${MAGENTA}╔═════════════════════════════════════════════════════════════════╗${RESET}"
+    echo -e "${BOLD}${MAGENTA}║                  LIVE NOTIFICATION & OTP STREAM                 ║${RESET}"
+    echo -e "${BOLD}${MAGENTA}╚═════════════════════════════════════════════════════════════════╝${RESET}\n"
+
+    local raw_dump
+    raw_dump=$("$ADB" shell dumpsys notification --noredact 2>/dev/null || true)
+
+    # Parse notification titles and texts using python
+    python3 -c '
+import sys, re
+
+content = sys.stdin.read()
+records = content.split("NotificationRecord(")
+
+found = 0
+for r in records[1:]:
+    pkg_match = re.search(r"pkg=([^\s]+)", r)
+    title_match = re.search(r"android\.title=String \((.*?)\)", r)
+    text_match = re.search(r"android\.text=String \((.*?)\)", r)
+    ticker_match = re.search(r"tickerText=(.*?)\n", r)
+
+    pkg = pkg_match.group(1) if pkg_match else "Unknown"
+    title = title_match.group(1) if title_match else ""
+    text = text_match.group(1) if text_match else ""
+    
+    # Skip noise / persistent service notifications
+    if pkg in ["android", "com.android.systemui"] and "USB" in text:
+        continue
+    if not title and not text:
+        continue
+
+    found += 1
+    # Check for OTP patterns (4-8 digits)
+    otp_candidate = ""
+    otp_search = re.findall(r"\b\d{4,8}\b", f"{title} {text}")
+    if any(k in f"{title} {text}".lower() for k in ["otp", "code", "verification", "pin", "login", "password"]):
+        if otp_search:
+            otp_candidate = f" \033[1;33m[🔑 OTP Detected: {otp_search[0]}]\033[0m"
+
+    print(f"\033[1;36m• [{pkg}]\033[0m \033[1m{title}\033[0m{otp_candidate}")
+    print(f"  \033[2m{text}\033[0m\n")
+
+if found == 0:
+    print("  (No active user notifications found)")
+' <<< "$raw_dump"
+}
+
+cmd_calls() {
+    check_device
+    echo -e "\n${BOLD}${BLUE}╔═════════════════════════════════════════════════════════════════╗${RESET}"
+    echo -e "${BOLD}${BLUE}║                     RECENT CALL HISTORY LOG                     ║${RESET}"
+    echo -e "${BOLD}${BLUE}╚═════════════════════════════════════════════════════════════════╝${RESET}\n"
+
+    local raw_calls
+    raw_calls=$("$ADB" shell "content query --uri content://call_log/calls --projection number:name:type:date:duration" 2>/dev/null || true)
+
+    python3 -c '
+import sys, datetime, re
+
+lines = sys.stdin.readlines()
+count = 0
+for line in lines[:15]:
+    if not line.startswith("Row:"):
+        continue
+    num_m = re.search(r"number=([^,\s]+)", line)
+    name_m = re.search(r"name=([^,\s]+)", line)
+    type_m = re.search(r"type=([^,\s]+)", line)
+    date_m = re.search(r"date=([^,\s]+)", line)
+    dur_m = re.search(r"duration=([^,\s]+)", line)
+
+    number = num_m.group(1) if num_m else "Unknown"
+    name = name_m.group(1) if name_m and name_m.group(1) != "NULL" else number
+    ctype = type_m.group(1) if type_m else "1"
+    timestamp = int(date_m.group(1)) / 1000 if date_m else 0
+    duration = dur_m.group(1) if dur_m else "0"
+
+    date_str = datetime.datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M") if timestamp else "N/A"
+
+    # Call types: 1: Incoming, 2: Outgoing, 3: Missed, 5: Rejected
+    if ctype == "1":
+        badge = "\033[1;32m[INCOMING]\033[0m"
+    elif ctype == "2":
+        badge = "\033[1;34m[OUTGOING]\033[0m"
+    elif ctype == "3":
+        badge = "\033[1;31m[MISSED]\033[0m"
+    else:
+        badge = f"[OTHER ({ctype})]"
+
+    print(f" {badge} \033[1m{name}\033[0m ({number}) | {duration}s | \033[2m{date_str}\033[0m")
+    count += 1
+
+if count == 0:
+    print("  (No call logs found)")
+' <<< "$raw_calls"
+    echo ""
+}
+
+cmd_dial() {
+    check_device
+    local target="$1"
+    if [ -z "$target" ]; then
+        log_error "Please specify a phone number to dial. Usage: phone dial <number>"
+        exit 1
+    fi
+    log_info "Initiating phone call to: ${BOLD}$target${RESET}..."
+    "$ADB" shell am start -a android.intent.action.CALL -d "tel:$target"
+    log_ok "Dialer intent transmitted!"
+}
+
+cmd_answer() {
+    check_device
+    log_info "Accepting incoming call..."
+    "$ADB" shell input keyevent KEYCODE_HEADSETHOOK || "$ADB" shell input keyevent KEYCODE_CALL
+    log_ok "Call answered."
+}
+
+cmd_hangup() {
+    check_device
+    log_info "Ending call..."
+    "$ADB" shell input keyevent KEYCODE_ENDCALL
+    log_ok "Call ended."
+}
+
+cmd_app() {
+    check_device
+    local query="$1"
+    if [ -z "$query" ]; then
+        log_error "Usage: phone open <app_name> (e.g. phone open whatsapp, phone open settings)"
+        exit 1
+    fi
+
+    log_info "Searching for package matching '${BOLD}$query${RESET}'..."
+    local match
+    match=$("$ADB" shell pm list packages | grep -i "$query" | head -n1 | cut -d: -f2 | tr -d '\r\n' || true)
+
+    if [ -z "$match" ]; then
+        log_error "No package found matching '$query'."
+        echo -e "\nInstalled third-party packages sample:"
+        "$ADB" shell pm list packages -3 | head -n 10 | cut -d: -f2
+        exit 1
+    fi
+
+    log_info "Launching package: ${GREEN}$match${RESET}..."
+    "$ADB" shell monkey -p "$match" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
+    log_ok "Launched $match!"
+}
+
+cmd_clip() {
+    check_device
+    if [ -n "$1" ]; then
+        log_info "Safely transferring text to phone clipboard (Base64 Sanitized)..."
+        local b64_payload
+        b64_payload=$(printf '%s' "$1" | base64 -w 0)
+        "$ADB" shell "echo '$b64_payload' | base64 -d > /data/local/tmp/aegis_clip.txt"
+        "$ADB" shell "export TEXT=\$(cat /data/local/tmp/aegis_clip.txt); cmd clipboard set \"\$TEXT\" 2>/dev/null || input text \"\$(cat /data/local/tmp/aegis_clip.txt | tr ' ' '%s')\""
+        "$ADB" shell rm -f /data/local/tmp/aegis_clip.txt
+        log_ok "Text injected into phone clipboard successfully!"
+    else
+        log_info "Fetching phone clipboard text..."
+        "$ADB" shell service call clipboard 2 s16 "com.android.shell" 2>/dev/null || true
+    fi
+}
+
+cmd_push() {
+    check_device
+    local file_path="$1"
+    local dest_folder="${2:-/sdcard/Pictures/}"
+
+    if [ -z "$file_path" ] || [ ! -e "$file_path" ]; then
+        log_error "File does not exist: $file_path"
+        exit 1
+    fi
+
+    local filename
+    filename=$(basename "$file_path")
+    log_info "Pushing ${BOLD}$filename${RESET} to device ${CYAN}$dest_folder${RESET}..."
+    "$ADB" push "$file_path" "$dest_folder"
+    
+    # Broadcast media scanner so Gallery/WhatsApp/Instagram pick it up instantly
+    "$ADB" shell am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d "file://${dest_folder}${filename}" >/dev/null 2>&1 || true
+    log_ok "File transferred! It will appear instantly in your phone Gallery/Files."
+}
+
+cmd_battery_watch() {
+    check_device
+    log_info "Starting Safe-Charging & Thermal Watchdog Daemon (Press Ctrl+C to stop)..."
+    while true; do
+        local dump level temp status
+        dump=$("$ADB" shell dumpsys battery 2>/dev/null || true)
+        level=$(echo "$dump" | awk '/level:/ {print $2}' | tr -d '\r\n')
+        temp=$(echo "$dump" | awk '/temperature:/ {print $2/10}' | tr -d '\r\n')
+        status=$(echo "$dump" | awk '/status:/ {print $2}' | tr -d '\r\n')
+
+        echo -ne "\r${CYAN}⚡ Battery:${RESET} ${YELLOW}${level}%${RESET} | ${CYAN}Temp:${RESET} ${temp}°C | Status: ${status}    "
+
+        # Overheat alert (> 42°C)
+        if (( $(echo "$temp > 42.0" | bc -l) )); then
+            notify-send -u critical "⚠️ PHONE OVERHEATING!" "Temperature reached ${temp}°C. Unplug immediately!" 2>/dev/null || true
+            paplay /usr/share/sounds/freedesktop/stereo/alarm-clock-elapsed.oga 2>/dev/null || true
+        fi
+
+        # Full charge protection alert (> 85%)
+        if [ "$level" -ge 85 ] && [ "$status" -eq 2 ]; then
+            notify-send "🔋 Phone Charged to ${level}%" "Battery is sufficiently charged. You can unplug the charger." 2>/dev/null || true
+        fi
+        sleep 5
+    done
+}
+
+cmd_status() {
+    check_device
+    echo -e "\n${BOLD}${BLUE}╔═════════════════════════════════════════════════════════════════╗${RESET}"
+    echo -e "${BOLD}${BLUE}║                     DEVICE STATUS DASHBOARD                     ║${RESET}"
+    echo -e "${BOLD}${BLUE}╚═════════════════════════════════════════════════════════════════╝${RESET}\n"
+
+    local model brand android_ver ip battery_level battery_temp battery_status storage_info dims
+    model=$("$ADB" shell getprop ro.product.model | tr -d '\r\n')
+    brand=$("$ADB" shell getprop ro.product.brand | tr -d '\r\n')
+    android_ver=$("$ADB" shell getprop ro.build.version.release | tr -d '\r\n')
+    dims=$(get_screen_dimensions)
+    ip=$(get_phone_ip)
+    
+    local battery_dump
+    battery_dump=$("$ADB" shell dumpsys battery)
+    battery_level=$(echo "$battery_dump" | awk '/level:/ {print $2}' | tr -d '\r\n')
+    battery_temp=$(echo "$battery_dump" | awk '/temperature:/ {print $2/10}' | tr -d '\r\n')
+    battery_status=$(echo "$battery_dump" | awk '/status:/ {print $2}' | tr -d '\r\n')
+
+    case "$battery_status" in
+        2) b_stat="Charging (AC/USB)" ;;
+        3) b_stat="Discharging" ;;
+        4) b_stat="Not Charging" ;;
+        5) b_stat="Full" ;;
+        *) b_stat="Unknown ($battery_status)" ;;
+    esac
+
+    storage_info=$("$ADB" shell df -h /data 2>/dev/null | awk 'NR==2 {print "Used: "$3" / "$2" ("$5" used)"}' || echo "N/A")
+
+    echo -e " ${BOLD}Hardware Model:${RESET}     ${GREEN}$brand $model${RESET} (Android $android_ver)"
+    echo -e " ${BOLD}Display Dimensions:${RESET} ${dims} (Native Resolution)"
+    echo -e " ${BOLD}Wi-Fi IP Address:${RESET}   ${CYAN}${ip:-Disconnected / Not Available}${RESET}"
+    echo -e " ${BOLD}Battery Level:${RESET}      ${YELLOW}${battery_level}%${RESET} (${b_stat})"
+    echo -e " ${BOLD}Battery Temp:${RESET}       ${battery_temp}°C"
+    echo -e " ${BOLD}Internal Storage:${RESET}   $storage_info"
+    echo -e " ${BOLD}ADB Transport:${RESET}      $("$ADB" get-state 2>/dev/null || echo "Unknown")"
+    echo ""
+}
+
+cmd_backup() {
+    check_device
+    local target_dir="${1:-$HOME/PhoneBackup_$(date +%Y%m%d_%H%M%S)}"
+    mkdir -p "$target_dir"
+    log_info "Starting automated device backup to ${BOLD}$target_dir${RESET}..."
+
+    folders=("DCIM" "Pictures" "Download" "Documents" "WhatsApp")
+    for f in "${folders[@]}"; do
+        log_info "Scanning for /sdcard/$f..."
+        if "$ADB" shell "[ -d /sdcard/$f ]" 2>/dev/null; then
+            log_info "Pulling /sdcard/$f ..."
+            "$ADB" pull "/sdcard/$f" "$target_dir/" || log_warn "Partial pull on $f"
+        fi
+    done
+    log_ok "Backup completed! Files safely archived at: $target_dir"
+}
+
+cmd_screenshot() {
+    check_device
+    local out="${1:-$HOME/Pictures/phone_screenshot_$(date +%Y%m%d_%H%M%S).png}"
+    mkdir -p "$(dirname "$out")"
+    log_info "Capturing direct framebuffer screenshot..."
+    "$ADB" exec-out screencap -p > "$out"
+    log_ok "Screenshot saved to: ${BOLD}$out${RESET}"
+}
+
+cmd_install() {
+    check_device
+    local apk="$1"
+    if [ -z "$apk" ] || [ ! -f "$apk" ]; then
+        log_error "Please provide a valid path to an APK file. Usage: phone install <path-to.apk>"
+        exit 1
+    fi
+    log_info "Sideloading $apk with permission grant flag (-g)..."
+    "$ADB" install -r -g "$apk"
+    log_ok "Package installed successfully!"
+}
+
+cmd_help() {
+    log_banner
+    echo -e "${BOLD}USAGE:${RESET} phone [COMMAND | OPTION]"
+    echo ""
+    echo -e "${BOLD}CORE MIRRORING MODES:${RESET}"
+    echo -e "  ${GREEN}(no args)${RESET}        High-Definition Mirror (1080p @ 16Mbps, Display OFF, Audio ON)"
+    echo -e "  ${GREEN}--hq${RESET}             Ultra-Crisp Studio Mirror (Native 1080x2460 @ 30Mbps)"
+    echo -e "  ${GREEN}-w, --wifi${RESET}       Auto-discover Wi-Fi IP and start wireless scrcpy mirror"
+    echo -e "  ${GREEN}-e, --eco${RESET}        Low-bandwidth / low-battery 720p 30fps rescue mirror"
+    echo -e "  ${GREEN}-o, --otg${RESET}        Pure HID hardware mouse & keyboard simulation mode"
+    echo -e "  ${GREEN}-a, --audio${RESET}      Audio-only forwarding mode (no video window)"
+    echo ""
+    echo -e "${BOLD}DEAD-SCREEN RESCUE & KEYCODES:${RESET}"
+    echo -e "  ${CYAN}unlock [PIN]${RESET}     Wake phone, collapse shade, enter PIN, and launch mirror"
+    echo -e "  ${CYAN}unlock-only [PIN]${RESET}Silently unlock without launching mirror GUI"
+    echo -e "  ${CYAN}power${RESET}            Simulate physical POWER button press"
+    echo -e "  ${CYAN}home | back${RESET}      Simulate HOME or BACK navigation buttons"
+    echo -e "  ${CYAN}volup | voldn${RESET}    Volume UP or DOWN keypress"
+    echo ""
+    echo -e "${BOLD}COMMUNICATIONS & FAST ACTIONS:${RESET}"
+    echo -e "  ${MAGENTA}notifs${RESET}           Live notification stream with automatic OTP detection"
+    echo -e "  ${MAGENTA}calls${RESET}            View recent incoming, outgoing & missed calls"
+    echo -e "  ${MAGENTA}dial <number>${RESET}    Directly place an outgoing phone call"
+    echo -e "  ${MAGENTA}answer | hangup${RESET}  Accept incoming call or terminate active call"
+    echo -e "  ${MAGENTA}open <app>${RESET}       Launch installed app directly (e.g. phone open whatsapp)"
+    echo ""
+    echo -e "${BOLD}ENTERPRISE DIAGNOSTICS & MANAGEMENT:${RESET}"
+    echo -e "  ${YELLOW}status${RESET}           Live device dashboard (Battery %, Temp, Storage, Wi-Fi IP)"
+    echo -e "  ${YELLOW}watch${RESET}            Safe-charging thermal monitor with desktop audio alerts"
+    echo -e "  ${YELLOW}shot [file.png]${RESET}  Capture lossless screenshot directly from phone framebuffer"
+    echo -e "  ${YELLOW}backup [path]${RESET}    One-click archive of DCIM, Pictures, Downloads, WhatsApp"
+    echo -e "  ${YELLOW}install <apk>${RESET}    Sideload APK with auto-granted permissions"
+    echo -e "  ${YELLOW}clip [text]${RESET}      Set or view device clipboard"
+    echo -e "  ${YELLOW}shell${RESET}            Open direct interactive ADB terminal shell"
+    echo -e "  ${YELLOW}reboot [recovery]${RESET}Reboot phone to system, recovery, or bootloader"
+    echo ""
+}
+
+# Main Execution Switch
+case "$1" in
+    ""|-s|--screen-off)
+        cmd_mirror_default
+        ;;
+    -b|--bg|--background)
+        log_info "Launching Mirror in background daemon..."
+        cmd_mirror_default >/dev/null 2>&1 &
+        log_ok "Mirror running in background (PID $!). Terminal is free for input!"
+        ;;
+    --hq|hq|-hq)
+        cmd_mirror_hq
+        ;;
+    -w|--wifi|-wifi|wifi)
+        cmd_mirror_wifi
+        ;;
+    -e|--eco|eco)
+        cmd_mirror_eco
+        ;;
+    -o|--otg|otg)
+        cmd_otg
+        ;;
+    -a|--audio|audio)
+        cmd_audio_only
+        ;;
+    gui|deck)
+        cmd_gui
+        ;;
+    app-unlock)
+        shift
+        cmd_app_unlock "$@"
+        ;;
+    bypass-applock)
+        cmd_bypass_applock
+        ;;
+    unlock)
+        shift
+        cmd_unlock_and_mirror "$@"
+        ;;
+    unlock-only)
+        shift
+        cmd_unlock "$@"
+        ;;
+    notifs|notifications)
+        cmd_notifs
+        ;;
+    calls|call-log)
+        cmd_calls
+        ;;
+    dial|call)
+        shift
+        cmd_dial "$@"
+        ;;
+    answer)
+        cmd_answer
+        ;;
+    hangup|endcall)
+        cmd_hangup
+        ;;
+    open|launch)
+        shift
+        cmd_app "$@"
+        ;;
+    watch|battery-watch)
+        cmd_battery_watch
+        ;;
+    status)
+        cmd_status
+        ;;
+    ip)
+        check_device
+        get_phone_ip
+        ;;
+    shot|screenshot)
+        shift
+        cmd_screenshot "$@"
+        ;;
+    backup)
+        shift
+        cmd_backup "$@"
+        ;;
+    clip|clipboard)
+        shift
+        cmd_clip "$@"
+        ;;
+    push|send-file)
+        shift
+        cmd_push "$@"
+        ;;
+    install)
+        shift
+        cmd_install "$@"
+        ;;
+    power)
+        check_device
+        "$ADB" shell input keyevent KEYCODE_POWER
+        log_ok "Power key event sent."
+        ;;
+    home)
+        check_device
+        "$ADB" shell input keyevent KEYCODE_HOME
+        ;;
+    back)
+        check_device
+        "$ADB" shell input keyevent KEYCODE_BACK
+        ;;
+    volup)
+        check_device
+        "$ADB" shell input keyevent KEYCODE_VOLUME_UP
+        ;;
+    voldn)
+        check_device
+        "$ADB" shell input keyevent KEYCODE_VOLUME_DOWN
+        ;;
+    shell)
+        check_device
+        "$ADB" shell
+        ;;
+    reboot)
+        check_device
+        target="${2:-}"
+        log_warn "Rebooting device $target..."
+        "$ADB" reboot "$target"
+        ;;
+    devices)
+        "$ADB" devices -l
+        ;;
+    -h|--help|help)
+        cmd_help
+        ;;
+    *)
+        log_warn "Unknown command '$1'."
+        cmd_help
+        exit 1
+        ;;
+esac
