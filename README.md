@@ -223,13 +223,13 @@ phone fix-auth
 ---
 
 ### 2. 🔌 Device Not Detected (`phone devices` shows empty list)
-- Ensure your USB cable supports high-speed data transfer (some cheap cables are power-only).
-- Plug directly into your computer's motherboard / primary USB port rather than unpowered hubs.
-- On Fedora / Ubuntu, ensure your user belongs to the `plugdev` or `dialout` group:
+- Ensure your USB cable supports high-speed data transfer (some cheap charging cables only supply power and lack data lines).
+- Plug directly into your computer's motherboard / primary USB port rather than unpowered multi-port USB hubs.
+- Ensure your Linux user has permission to access USB devices (if running into permission denied errors):
   ```bash
-  sudo usermod -aG plugdev $USER
+  sudo adb kill-server && sudo adb start-server
   ```
-- Restart the local ADB daemon:
+- Reconnect the USB cable firmly or restart ADB daemon:
   ```bash
   adb kill-server && adb start-server
   ```
@@ -263,42 +263,66 @@ phone fix-auth
 
 <details>
 <summary><b>Q1: Can I use Aegis-Phone if my touch screen is 100% dead?</b></summary>
-<b>Yes, absolutely!</b> That is the exact reason Aegis-Phone was created. All mouse clicks, gestures, text input, and file drag-and-drops from your PC are sent as software hardware events via ADB and USB-HID. Your physical digitizer does not need to work at all.
+<br>
+
+**Yes, absolutely!** That is the exact reason Aegis-Phone was created. All mouse clicks, gestures, text input, and file drag-and-drops from your PC are sent as software hardware events via ADB and USB-HID. Your physical digitizer does not need to work at all.
+
 </details>
 
 <details>
 <summary><b>Q2: Does Aegis-Phone require my phone to be Rooted?</b></summary>
-<b>No root required!</b> All capabilities—including display blackout, blind PIN unlock, OTP reading, clipboard synchronization, and call dialing—work on standard unrooted production Android devices.
+<br>
+
+**No root required!** All capabilities—including display blackout, blind PIN unlock, OTP reading, clipboard synchronization, and call dialing—work on standard unrooted production Android devices.
+
 </details>
 
 <details>
 <summary><b>Q3: How do I copy-paste images or files from my PC to my phone?</b></summary>
+<br>
+
 You have two easy ways:
-1. **Via Floating Controller (`phone gui`):** Click <i>"🖼️ Paste Image to Phone"</i> to instantly push any image from your PC clipboard into your phone's Gallery, or click <i>"📁 Send File / Video..."</i> to browse and upload.
+
+1. **Via Floating Controller (`phone gui`):**
+   - Click **"🖼️ Paste Image to Phone"** to instantly push any image from your PC clipboard into your phone's Gallery.
+   - Click **"📁 Send File / Video..."** to browse and upload files directly.
+
 2. **Via Command Line:**
    ```bash
    phone push ~/Pictures/screenshot.png /sdcard/Pictures/
    ```
    Aegis-Phone automatically triggers Android's MediaScanner so WhatsApp and Gallery recognize the new file immediately.
+
 </details>
 
 <details>
 <summary><b>Q4: Will my physical screen light up and show my messages to people around me?</b></summary>
-<b>No.</b> Aegis-Phone sends hardware commands to keep the physical backlight completely dark (`0` brightness and powered-off state). Your private activities remain visible only on your Linux computer monitor.
+<br>
+
+**No.** Aegis-Phone sends hardware commands to keep the physical backlight completely dark (`0` brightness and powered-off state). Your private activities remain visible only on your Linux computer monitor.
+
 </details>
 
 <details>
 <summary><b>Q5: Can I use this wirelessly without keeping the USB cable connected all day?</b></summary>
-<b>Yes!</b> While connected via USB, run:
+<br>
+
+**Yes!** While connected via USB, run:
+
 ```bash
 phone --wifi
 ```
-Aegis-Phone will resolve your device's local Wi-Fi IP address on `wlan0`, bind ADB to port 5555, and launch a wireless mirror session. You can then disconnect the USB cable.
+
+Aegis-Phone will resolve your device's local Wi-Fi IP address on `wlan0`, bind ADB to port 5555, and launch a wireless mirror session. You can then safely disconnect the USB cable.
+
 </details>
 
 <details>
 <summary><b>Q6: What happens if my PC restarts? Will I lose access?</b></summary>
+<br>
+
 If you run `phone auth-persist`, your PC's RSA signature is permanently whitelisted in Android's flash memory, and the 7-day auto-revocation timer is set to `0`. Even after 100 PC reboots, your phone will remain authorized.
+
 </details>
 
 ---
